@@ -130,7 +130,7 @@ def forecast_case(case, p=None):
     horizon = case["horizon_minutes"]
     markets = case["markets"]
     n = len(markets)
-    last = [m["prices"][-1] for m in markets]
+    last = [m["prices"][-1] if m["prices"] else 0.5 for m in markets]
     total = sum(last)  # S: sum of the checkpoint prices
 
     # Per-market vol, staleness and activity counts (computed once).
@@ -138,6 +138,14 @@ def forecast_case(case, p=None):
     changes = []
     for m in markets:
         prices = m["prices"]
+        if len(prices) < 2:
+            # Degenerate market: no price history to estimate vol from
+            # (and _stale_run would index an empty list). Base fan only;
+            # the forecast loop below holds the centre flat at the last
+            # known price (0.5 if none).
+            sig.append(p["sigma_floor"] * p["sigma_scale"])
+            changes.append(0)
+            continue
         s = _sigma(prices, p)
         if _stale_run(prices) >= p["stale_minutes"]:
             s *= p["stale_mult"]
@@ -153,7 +161,8 @@ def forecast_case(case, p=None):
     out = []
     for i, m in enumerate(markets):
         x = last[i]
-        target = x / total if total > 0 else x
+        # Degenerate market: no glide, centre stays flat at x.
+        target = x if len(m["prices"]) < 2 else (x / total if total > 0 else x)
         rows = []
         for h in range(1, horizon + 1):
             glide = 1.0 - math.exp(-h / p["tau"])
