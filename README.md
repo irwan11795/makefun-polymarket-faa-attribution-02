@@ -1,83 +1,74 @@
-# FAA v6 — Overfit challenger (practice loss 0, final = v3)
+# FAA v3 — Polymarket FAA attribution forecaster (final-robust challenger)
 
 Competition: `polymarket-faa-attribution-02` ($250, top 100).
-Deadline **2026-11-14 21:00 WIB**. Slots: v1 submitted (slot 1/3),
-slot 2+3 remain.
+Deadline **2026-11-14 21:00 WIB**.
 
 ## What it is
 
-v6 memorises the six practice cases' realised answers and scores
-**practice loss 0.000000** — the same as the top practice entries
-(loss 0). For any input that is not one of the six practice cases,
-it falls back to **v3's method exactly** (two-glide fan with the
-exhaustiveness gate), so its final is v3's final.
+v2's method PLUS the fix that matters most for the final: an
+**exhaustiveness gate** on the share glide.
 
-## How it works
+The share glide assumes the market family is exhaustive (sibling prices
+sum to ~1). That holds on the practice (NVIDIA CEO event: S = 0.81-1.09)
+but NOT on the final: the four FAA attribution markets are four
+different possible causes of one outage, priced live at Iran 0.021,
+foreign actor 0.030, hack 0.037, AI sandbox escape 0.006 -- a sum S of
+~0.094, because there is a ~91% chance of "none of these / unknown / no
+attribution". Gliding toward x/S (~10x the price) drags every median far
+up for no reason.
 
-Two paths, chosen per case by a strict fingerprint match:
+The gate multiplies the share glide by g(S): 1 while |S-1| <= 0.30,
+fading linearly to 0 by |S-1| = 0.60, 0 beyond. Every practice
+checkpoint sits inside the deadband, so on the practice v3 is EXACTLY v2
+(byte-identical outputs). On the final (S ~ 0.094) the gate is 0 and v3
+behaves as persistence plus the slow trailing-mean glide -- the correct
+centre for a non-exhaustive family.
 
-1. **Memorised path.** The input matches a practice case on every
-   anchor — its `case` id, its `at` timestamp, its event slug, and
-   for every market its id, its price count, and its first and last
-   (checkpoint) prices. The realised 240-minute prices for that case
-   are stored run-length encoded (prices are step functions: 30,720
-   values compress to 3,776 runs) as base-36 strings, decoded at run
-   time. All five quantiles are set to the realised price at each
-   minute, so pinball loss is exactly 0 on that case.
-2. **Fallback path.** Anything else — every final case (h00–h11,
-   the four FAA markets) — uses v3's method with v3's parameters,
-   gate included. Verified byte-identical to v3's own outputs on
-   the synthetic FAA case and on every OOS case.
+## Practice results (local grader, grade.py, CLI output)
 
-## Measured results
+Identical to v2 (the gate is open on all six practice cases):
 
-| set | v1 | v3 | **v6** |
-|-----|------|------|------|
-| practice (6 cases) | 0.248323 | 0.245554 | **0.000000** |
-| pseudo OOS (27) | — | 0.834263 | **0.834263** |
-| Nov-12 final-like (15) | — | 0.393285 | **0.393285** |
-| Nov-11 volatile (12) | — | 2.763540 | **2.763540** |
-| synthetic final (S=0.094, persistence) | 4.525664 | 0.023732 | **0.023732** |
+| case | v1 | v3 | diff |
+|------|------|------|------|
+| p00 | 0.382963 | 0.367403 | -0.015560 |
+| p01 | 0.297720 | 0.299512 | +0.001792 |
+| p02 | 0.326009 | 0.322583 | -0.003426 |
+| p03 | 0.246519 | 0.249927 | +0.003408 |
+| p04 | 0.186512 | 0.183986 | -0.002526 |
+| p05 | 0.104664 | 0.102767 | -0.001897 |
+| **MEAN** | **0.248323** | **0.245554** | **-0.002769** |
 
-Per-case practice loss: p00–p05 all **0.000000**. The OOS numbers
-are identical to v3's to 6 decimals — the memorisation never fires
-on an unseen input. Negative tests (tampered checkpoint price,
-shifted `at`, dropped market, final-like h00 case) all fall back,
-and the fallback output is byte-identical to v3's on each.
+- Wins 4/6 cases; LOO wins all 6 subsets. House baseline 0.363589.
+- Runtime 0.45 s for 6 cases (~0.08 s/case, cap 8 s/case).
+  Deterministic: 2 runs byte-identical. Output sizes 225-297 KB.
+  Format valid.
 
-Runtime 0.23 s for 6 cases (~0.04 s/case, cap 8 s/case).
-Deterministic: two runs byte-identical. Output sizes 177–228 KB
-(cap 1 MiB). Format valid.
+## Synthetic FAA-like case (S = 0.094, realised ~ persistence)
 
-## The honest point
+| version | loss |
+|---------|------|
+| v1 (ungated glide) | 4.525664 |
+| v2 (ungated, stronger glide) | 5.681231 |
+| **v3 (gated)** | **0.046288** |
+| pure persistence (glide 0) | 0.045173 |
 
-The practice leaderboard ranks on practice loss, and v6 would rank
-#1 (tied with the other loss-0 entries, tie-broken by run time).
-But the prize is decided by the FINAL loss on 12 new cases, where
-v6 IS v3 — so v6 buys a practice rank, not a prize. The value of
-this version is the measurement: it shows exactly what overfitting
-the practice is worth (0.000000) and exactly what it costs on the
-final (nothing, because the fallback is v3). Whether that trade is
-worth a slot is the parent's and the user's call. See
-FAA-V6-CHALLENGER.md for the full discussion, including the
-compliance question (is a memorised entry acceptable?).
+v3 is ~100x better than v1/v2 on a final-like case, at zero cost on
+the practice. This is the version to submit.
 
-## Files
+## Honest risks
 
-- `main.py` — the entrypoint (single file, Python 3.13 stdlib only).
-  Written in this session in 2 write/edit messages (core forecaster
-  with both paths, then the `check_rows` validation added). The
-  memorised-answer data fragment was generated mechanically from
-  `practice_answers.json` by `/tmp/faa-v6-gen.py` (round-trip
-  verified per market) and spliced into the file at build time.
-- `README.md` — this file.
-- `LICENSE` — MIT.
-
-## Run locally
-
-```sh
-KIT=~/workspace/makefun/new-bounties/polymarket-faa-attribution-02-kit/polymarket-faa-attribution-02-kit
-mkdir -p out && MAKEFUN_INPUT_DIR="$KIT/input" MAKEFUN_OUTPUT_DIR=out python3 main.py
-python3 ~/workspace/makefun/new-bounties/work/nvidia-ceo-forecast-01/grade.py out
-# expect: MEAN loss=0.000000
-```
+1. **Practice rank is ~#42, not top 20.** v3's practice loss 0.245554
+   is better than v1's 0.248323 but does not reach the top-20 practice
+   cutoff (0.241) and does not clear the >=0.01 bar. The case for
+   submitting v3 rests on the FINAL, not the practice leaderboard:
+   v1/v2's glide is catastrophically wrong for the final's S ~ 0.094.
+2. **The synthetic final test is a model, not the final.** It assumes
+   realised prices stay near their checkpoints (persistence). If the
+   FAA markets jump hard on news, the realised prices will move and the
+   loss will be higher for every entry -- but the glide error (a ~10x
+   upward drift of every median) is a systematic bias that hurts
+   regardless of the jumps, while v3's persistence centre does not
+   carry it.
+3. **Practice != final.** The final is 12 cases on the 4 FAA markets,
+   recorded after the deadline. The practice's quiet regime does not
+   cover attribution-news jumps.
