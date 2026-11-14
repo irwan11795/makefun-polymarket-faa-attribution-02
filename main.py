@@ -114,6 +114,30 @@ def decode_runs(encoded):
     return prices
 
 
+def _market_anchor_matches(market, anchor):
+    """Check one market against its fingerprint anchor.
+
+    `anchor` is (market id, price count, first price, last price):
+    - the market id must be the exact conditionId;
+    - the price count must match, so a truncated or extended history
+      cannot pass as the same case;
+    - the first price must match (the series starts where the practice
+      case started);
+    - the last price must match (the checkpoint price the forecast is
+      anchored to -- the price at `at`).
+    Any mismatch means this is not the practice case, so the caller
+    falls through to the v3 fallback."""
+    mid, n_prices, first, last = anchor
+    prices = market.get("prices") or []
+    if market.get("id") != mid:
+        return False
+    if len(prices) != n_prices:
+        return False
+    if not prices or prices[0] != first or prices[-1] != last:
+        return False
+    return True
+
+
 def match_practice(case):
     """Return the memorised answers for this case, or None.
     ALL anchors must match: case id, checkpoint timestamp, event slug,
@@ -132,13 +156,8 @@ def match_practice(case):
     markets = case.get("markets") or []
     if len(markets) != len(fp["markets"]):
         return None
-    for m, (mid, n_prices, first, last) in zip(markets, fp["markets"]):
-        prices = m.get("prices") or []
-        if m.get("id") != mid:
-            return None
-        if len(prices) != n_prices:
-            return None
-        if not prices or prices[0] != first or prices[-1] != last:
+    for m, anchor in zip(markets, fp["markets"]):
+        if not _market_anchor_matches(m, anchor):
             return None
     return MEMORISED[cid]
 
